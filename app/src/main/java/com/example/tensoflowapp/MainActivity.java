@@ -11,7 +11,6 @@ import android.graphics.Paint;
 import android.graphics.drawable.BitmapDrawable;
 import android.os.Bundle;
 import android.provider.MediaStore;
-import android.text.TextUtils;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -31,14 +30,14 @@ import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import org.tensorflow.lite.DataType;
-import org.tensorflow.lite.support.image.TensorImage;
 
 import org.tensorflow.lite.support.label.Category;
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.text.DecimalFormat;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements OnSuccessListener<Text>, OnFailureListener
@@ -162,44 +161,68 @@ public class MainActivity extends AppCompatActivity implements OnSuccessListener
                 .addOnFailureListener(this);
         mImageView.setImageBitmap((bitmap));
     }
-
-
-    public void PersonalizedModel(View v) {
+    public void PersonalizedModel(View v){
         try {
-            ModelUnquant model =  ModelUnquant.newInstance(getApplicationContext());
-            Bitmap imagen_preprocesada = preprocessImage(mSelectedImage);
-            Bitmap imagen_escalada = Bitmap.createScaledBitmap(imagen_preprocesada,224,224,true);
-            TensorImage image = new TensorImage(DataType.FLOAT32);
-            image.load(imagen_escalada);
+
+            //Definir Estiquetas de acuerdo a su archivo "labels.txt" generado por la Plataforma de creación del Modelo
+            String[] etiquetas = {"Abhay_Deol","Adil_Hussain","Ajay_Devgn","Akshay_Kumar", "Akshaye_Khanna"};
+
+            ModelUnquant model = ModelUnquant.newInstance(getApplicationContext());
             TensorBuffer inputFeature0 = TensorBuffer.createFixedSize(new int[]{1, 224, 224, 3}, DataType.FLOAT32);
-            inputFeature0.loadBuffer(image.getBuffer());
+            inputFeature0.loadBuffer(convertirImagenATensorBuffer(mSelectedImage));
+
             ModelUnquant.Outputs outputs = model.process(inputFeature0);
             TensorBuffer outputFeature0 = outputs.getOutputFeature0AsTensorBuffer();
-            String [] etiquetas={"Abhay_Deol","Adil_Hussain","Ajay_Devgn","Akshay_Kumar", "Akshaye_Khanna"};
-            float[]probabilidades=outputFeature0.getFloatArray();
 
-            List<String> resultados = new ArrayList<>();
-            for (int i = 0; i < etiquetas.length; i++) {
-                resultados.add(etiquetas[i] + ": " + probabilidades[i] * 100);
-            }
-            String resultadoFinal = TextUtils.join("\n", resultados);
-            txtResults.setText("Resultados:\n" + resultadoFinal);
+            txtResults.setText(obtenerEtiquetayProbabilidad(etiquetas, outputFeature0.getFloatArray()));
+
             model.close();
-        } catch (IOException e) {
-            txtResults.setText("Error al procesar Modelo");
+        } catch (Exception e) {
+            txtResults.setText(e.getMessage());
         }
     }
-    private Bitmap preprocessImage(Bitmap image) {
 
-        int targetSize = 224;
-        Bitmap scaledImage = Bitmap.createScaledBitmap(image, targetSize, targetSize, true);
-        return scaledImage;
+    public ByteBuffer convertirImagenATensorBuffer(Bitmap mSelectedImage){
+
+        Bitmap imagen = Bitmap.createScaledBitmap(mSelectedImage, 224, 224, true);
+        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(4 * 224 * 224 * 3);
+        byteBuffer.order(ByteOrder.nativeOrder());
+
+        int[] intValues = new int[224 * 224];
+        imagen.getPixels(intValues, 0, imagen.getWidth(), 0, 0, imagen.getWidth(), imagen.getHeight());
+
+        int pixel = 0;
+
+        for(int i = 0; i <  imagen.getHeight(); i ++){
+            for(int j = 0; j < imagen.getWidth(); j++){
+                int val = intValues[pixel++]; // RGB
+                byteBuffer.putFloat(((val >> 16) & 0xFF) * (1.f / 255.f));
+                byteBuffer.putFloat(((val >> 8) & 0xFF) * (1.f / 255.f));
+                byteBuffer.putFloat((val & 0xFF) * (1.f / 255.f));
+            }
+        }
+        return  byteBuffer;
     }
+
+    public String obtenerEtiquetayProbabilidad(String[] etiquetas, float[] probabilidades){
+
+        float valorMayor=Float.MIN_VALUE;
+        int pos=-1;
+        for (int i = 0; i < probabilidades.length; i++) {
+            if (probabilidades[i] > valorMayor) {
+                valorMayor = probabilidades[i];
+                pos = i;
+            }
+        }
+
+        return "Predicción: " + etiquetas[pos] + ", Probabilidad: " + (new DecimalFormat("0.00").format(probabilidades[pos] * 100)) + "%";
+
+    }
+
     class CategoryComparator implements java.util.Comparator<Category> {
         @Override
         public int compare(Category a, Category b) {
             return (int)(b.getScore()*100) - (int)(a.getScore()*100);
         }
     }
-
 }
